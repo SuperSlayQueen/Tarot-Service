@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+    http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.24.xsd">
+
+    <!-- Lab 3: RANGE partitioning readings по created_at (месячные партиции) -->
+    <changeSet id="012-partition-readings" author="lab3">
+        <preConditions onFail="MARK_RAN">
+            <and>
+                <tableExists tableName="readings"/>
+                <not>
+                    <sqlCheck expectedResult="1">
+                        SELECT COUNT(*) FROM pg_partitioned_table pt
+                        JOIN pg_class c ON c.oid = pt.partrelid
+                        WHERE c.relname = 'readings'
+                    </sqlCheck>
+                </not>
+            </and>
+        </preConditions>
+        <comment>Конвертация readings в PARTITION BY RANGE (created_at)</comment>
+        <sql splitStatements="false"><![CDATA[
+            ALTER TABLE reading_cards DROP CONSTRAINT IF EXISTS fk_reading_cards_reading_id;
+
+            ALTER TABLE readings RENAME TO readings_legacy;
+
+            CREATE TABLE readings (
+                id BIGSERIAL,
+                user_id INTEGER NOT NULL,
+                spread_id INTEGER NOT NULL,
+                question VARCHAR(1000),
+                status VARCHAR(20) NOT NULL DEFAULT 'NEW',
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP,
+                PRIMARY KEY (id, created_at),
+                CONSTRAINT fk_readings_user_id FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                CONSTRAINT fk_readings_spread_id FOREIGN KEY (spread_id) REFERENCES spreads(id) ON DELETE RESTRICT
+            ) PARTITION BY RANGE (created_at);
+
+            -- базовые партиции: прошлый месяц, текущий и +3 вперёд
+            DO $$
+            DECLARE
+                start_month DATE := date_trunc('month', CURRENT_DATE - INTERVAL '1 month')::date;
+                i INT;
+                from_ts DATE;
+                to_ts DATE;
+                part_name TEXT;
+            BEGIN
+                FOR i IN 0..4 LOOP
+                    from_ts := (start_month + (i || ' months')::interval)::date;
+                    to_ts := (from_ts + INTERVAL '1 month')::date;
+                    part_name := 'readings_' || to_char(from_ts, 'YYYY_MM');
+                    EXECUTE format(
+                        'CREATE TABLE IF NOT EXISTS %I PARTITION OF readings FOR VALUES FROM (%L) TO (%L)',
+                        part_name, from_ts, to_ts
+                    );
+                END LOOP;
+            END $$;
+
+            -- default partition на случай данных вне горизонта
+            CREATE TABLE IF NOT EXISTS readings_default PARTITION OF readings DEFAULT;
+
+            INSERT INTO readings (id, user_id, spread_id, question, status, created_at, updated_at)
+            SELECT id, user_id, spread_id, question, status, created_at, updated_at
+            FROM readings_legacy;
+
+            SELECT setval(pg_get_serial_sequence('readings', 'id'),
+                COALESCE((SELECT MAX(id) FROM readings), 1), true);
+
+            DROP TABLE readings_legacy;
+
+            CREATE INDEX IF NOT EXISTS idx_readings_user_id ON readings (user_id);
+            CREATE INDEX IF NOT EXISTS idx_readings_status ON readings (status);
+            CREATE INDEX IF NOT EXISTS idx_readings_created_at ON readings (created_at);
+            CREATE INDEX IF NOT EXISTS idx_readings_user_created ON readings (user_id, created_at);
+            CREATE INDEX IF NOT EXISTS idx_readings_status_created ON readings (status, created_at);
+            CREATE INDEX IF NOT EXISTS idx_readings_user_status_created ON readings (user_id, status, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_readings_completed_created ON readings (created_at DESC) WHERE status = 'COMPLETED';
+
+            -- FK на партиционированную таблицу по одному id невозможен (PK составной),
+            -- целостность reading_id контролируется на уровне приложения.
+            CREATE INDEX IF NOT EXISTS idx_reading_cards_reading_id ON reading_cards (reading_id);
+        ]]></sql>
+    </changeSet>
+
+</databaseChangeLog>

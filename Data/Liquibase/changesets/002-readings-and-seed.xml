@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+    http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.24.xsd">
+
+    <changeSet id="008-create-readings" author="system">
+        <createTable tableName="readings">
+            <column name="id" type="BIGSERIAL">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="user_id" type="INTEGER">
+                <constraints nullable="false"/>
+            </column>
+            <column name="spread_id" type="INTEGER">
+                <constraints nullable="false"/>
+            </column>
+            <column name="question" type="VARCHAR(1000)"/>
+            <column name="status" type="VARCHAR(20)" defaultValue="NEW">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="TIMESTAMP" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="TIMESTAMP"/>
+        </createTable>
+        <addForeignKeyConstraint
+            baseTableName="readings"
+            baseColumnNames="user_id"
+            constraintName="fk_readings_user_id"
+            referencedTableName="users"
+            referencedColumnNames="id"
+            onDelete="CASCADE"/>
+        <addForeignKeyConstraint
+            baseTableName="readings"
+            baseColumnNames="spread_id"
+            constraintName="fk_readings_spread_id"
+            referencedTableName="spreads"
+            referencedColumnNames="id"
+            onDelete="RESTRICT"/>
+        <createIndex tableName="readings" indexName="idx_readings_user_id">
+            <column name="user_id"/>
+        </createIndex>
+        <createIndex tableName="readings" indexName="idx_readings_status">
+            <column name="status"/>
+        </createIndex>
+        <createIndex tableName="readings" indexName="idx_readings_created_at">
+            <column name="created_at"/>
+        </createIndex>
+        <createIndex tableName="readings" indexName="idx_readings_user_created">
+            <column name="user_id"/>
+            <column name="created_at"/>
+        </createIndex>
+        <createIndex tableName="readings" indexName="idx_readings_status_created">
+            <column name="status"/>
+            <column name="created_at"/>
+        </createIndex>
+    </changeSet>
+
+    <changeSet id="009-create-reading-cards" author="system">
+        <createTable tableName="reading_cards">
+            <column name="id" type="BIGSERIAL">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="reading_id" type="BIGINT">
+                <constraints nullable="false"/>
+            </column>
+            <column name="card_id" type="INTEGER">
+                <constraints nullable="false"/>
+            </column>
+            <column name="position" type="INTEGER">
+                <constraints nullable="false"/>
+            </column>
+            <column name="is_reversed" type="BOOLEAN" defaultValueBoolean="false">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="TIMESTAMP" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+        <addForeignKeyConstraint
+            baseTableName="reading_cards"
+            baseColumnNames="reading_id"
+            constraintName="fk_reading_cards_reading_id"
+            referencedTableName="readings"
+            referencedColumnNames="id"
+            onDelete="CASCADE"/>
+        <addForeignKeyConstraint
+            baseTableName="reading_cards"
+            baseColumnNames="card_id"
+            constraintName="fk_reading_cards_card_id"
+            referencedTableName="cards"
+            referencedColumnNames="id"
+            onDelete="RESTRICT"/>
+        <addUniqueConstraint
+            tableName="reading_cards"
+            columnNames="reading_id,position"
+            constraintName="uq_reading_cards_reading_position"/>
+    </changeSet>
+
+    <changeSet id="010-seed-demo-data" author="system">
+        <sql>
+            INSERT INTO decks (name, description, author)
+            SELECT 'Rider-Waite', 'Классическая колода Таро', 'A.E. Waite'
+            WHERE NOT EXISTS (SELECT 1 FROM decks WHERE name = 'Rider-Waite');
+
+            INSERT INTO cards (name, description, suit, number, upright_meaning, reversed_meaning, deck_id)
+            SELECT v.name, v.description, v.suit, v.number, v.upright_meaning, v.reversed_meaning, d.id
+            FROM decks d
+            CROSS JOIN (VALUES
+                ('The Fool', 'Начало пути', 'Major Arcana', 0, 'Новые начинания', 'Безрассудство'),
+                ('The Magician', 'Воля и мастерство', 'Major Arcana', 1, 'Сила воли', 'Манипуляции'),
+                ('Ace of Cups', 'Эмоциональное начало', 'Cups', 1, 'Любовь', 'Эмоциональный блок'),
+                ('Two of Cups', 'Партнёрство', 'Cups', 2, 'Единство', 'Разлад'),
+                ('Ace of Wands', 'Искра действия', 'Wands', 1, 'Вдохновение', 'Задержки'),
+                ('Ace of Swords', 'Ясность мысли', 'Swords', 1, 'Истина', 'Путаница'),
+                ('Ace of Pentacles', 'Материальный потенциал', 'Pentacles', 1, 'Возможность', 'Упущенный шанс')
+            ) AS v(name, description, suit, number, upright_meaning, reversed_meaning)
+            WHERE d.name = 'Rider-Waite'
+              AND NOT EXISTS (SELECT 1 FROM cards c WHERE c.name = v.name AND c.deck_id = d.id);
+
+            INSERT INTO spreads (name, description, number_of_positions, position_names)
+            SELECT 'Three Cards', 'Прошлое / Настоящее / Будущее', 3, 'Past,Present,Future'
+            WHERE NOT EXISTS (SELECT 1 FROM spreads WHERE name = 'Three Cards');
+
+            INSERT INTO spreads (name, description, number_of_positions, position_names)
+            SELECT 'Celtic Cross', 'Классический кельтский крест', 10, '1,2,3,4,5,6,7,8,9,10'
+            WHERE NOT EXISTS (SELECT 1 FROM spreads WHERE name = 'Celtic Cross');
+
+            INSERT INTO users (username, email, password_hash, role)
+            SELECT 'admin', 'admin@tarot.local', '$2a$11$placeholderhashforseedonly000000000000000000', 'Admin'
+            WHERE NOT EXISTS (SELECT 1 FROM users WHERE username = 'admin');
+
+            INSERT INTO users (username, email, password_hash, role)
+            SELECT 'demo', 'demo@tarot.local', '$2a$11$placeholderhashforseedonly000000000000000000', 'User'
+            WHERE NOT EXISTS (SELECT 1 FROM users WHERE username = 'demo');
+        </sql>
+    </changeSet>
+
+</databaseChangeLog>

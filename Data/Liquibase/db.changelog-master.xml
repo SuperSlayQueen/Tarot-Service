@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+    http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.24.xsd">
+
+    <include file="changesets/001-initial-schema.xml"/>
+    <include file="changesets/002-readings-and-seed.xml"/>
+    <include file="changesets/003-lab1-indexes.xml"/>
+    <include file="changesets/004-readings-partitioning.xml"/>
+
+</databaseChangeLog>
