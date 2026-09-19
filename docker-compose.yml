@@ -1,0 +1,128 @@
+services:
+  db_primary:
+    image: postgres:16-alpine
+    container_name: db_primary
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: test_project_db
+      POSTGRES_USER: test_project_db
+      POSTGRES_PASSWORD: test_project_db
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --auth-local=scram-sha-256"
+    ports:
+      - "5437:5432"
+    command:
+      - postgres
+      - -c
+      - wal_level=replica
+      - -c
+      - max_wal_senders=10
+      - -c
+      - max_replication_slots=10
+      - -c
+      - hot_standby=on
+      - -c
+      - wal_keep_size=64MB
+    volumes:
+      - postgres_primary_data:/var/lib/postgresql/data
+      - ./Scripts/replication/01-primary-init.sh:/docker-entrypoint-initdb.d/01-primary-init.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U test_project_db -d test_project_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  db_replica:
+    image: postgres:16-alpine
+    container_name: db_replica
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: test_project_db
+      POSTGRES_USER: test_project_db
+      POSTGRES_PASSWORD: test_project_db
+      PRIMARY_HOST: db_primary
+      REPLICATION_USER: replicator
+      REPLICATION_PASSWORD: replicator
+    ports:
+      - "5438:5432"
+    volumes:
+      - postgres_replica_data:/var/lib/postgresql/data
+      - ./Scripts/replication/replica-entrypoint.sh:/replica-entrypoint.sh:ro
+    entrypoint: ["/bin/sh", "/replica-entrypoint.sh"]
+    depends_on:
+      db_primary:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U test_project_db -d test_project_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis_test
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  liquibase:
+    build:
+      context: .
+      dockerfile: Dockerfile.liquibase
+    container_name: liquibase_test
+    depends_on:
+      db_primary:
+        condition: service_healthy
+    volumes:
+      - ./Data/Liquibase:/liquibase/changelog
+    working_dir: /liquibase/changelog
+    command:
+      - --changeLogFile=db.changelog-master.xml
+      - --searchPath=/liquibase/changelog
+      - --url=jdbc:postgresql://db_primary:5432/test_project_db
+      - --username=test_project_db
+      - --password=test_project_db
+      - --driver=org.postgresql.Driver
+      - update
+
+  webapp:
+    build: .
+    container_name: test_project_app
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=http://+:8080
+      - ConnectionStrings__DefaultConnection=Host=db_primary;Port=5432;Database=test_project_db;Username=test_project_db;Password=test_project_db
+      - ConnectionStrings__ReplicaConnection=Host=db_replica;Port=5432;Database=test_project_db;Username=test_project_db;Password=test_project_db
+      - ConnectionStrings__Redis=redis:6379
+      - Jwt__SecretKey=your-super-secret-key-change-this-in-production-minimum-32-characters-long
+    depends_on:
+      db_primary:
+        condition: service_healthy
+      db_replica:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      liquibase:
+        condition: service_completed_successfully
+
+volumes:
+  postgres_primary_data:
+    driver: local
+  postgres_replica_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  default:
+    driver: bridge

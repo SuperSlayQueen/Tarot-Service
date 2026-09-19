@@ -1,0 +1,24 @@
+{
+  "Servers": {
+    "1": {
+      "Name": "Tarot Primary",
+      "Group": "Servers",
+      "Host": "localhost",
+      "Port": 5437,
+      "MaintenanceDB": "test_project_db",
+      "Username": "test_project_db",
+      "SSLMode": "prefer",
+      "Comment": "Primary — docker compose db_primary (write)"
+    },
+    "2": {
+      "Name": "Tarot Replica",
+      "Group": "Servers",
+      "Host": "localhost",
+      "Port": 5438,
+      "MaintenanceDB": "test_project_db",
+      "Username": "test_project_db",
+      "SSLMode": "prefer",
+      "Comment": "Replica — docker compose db_replica (read-only)"
+    }
+  }
+}
